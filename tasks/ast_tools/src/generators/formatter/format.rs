@@ -88,7 +88,7 @@ impl Generator for FormatterFormatGenerator {
         let output = quote! {
             #![expect(clippy::match_same_arms)]
             use oxc_ast::ast::*;
-            use oxc_span::GetSpan;
+            use oxc_span::{GetSpan, Span};
 
             ///@@line_break
             use crate::{
@@ -329,18 +329,46 @@ fn generate_enum_implementation(enum_def: &EnumDef, schema: &Schema) -> TokenStr
     {
         // Expression statements need specialized ASI-safe suppression handling in
         // `AstNode<ExpressionStatement>::write`.
-        let skip_expression_statement = if enum_def.name() == "Statement" {
-            quote! { !matches!(self.inner, Statement::ExpressionStatement(_)) && }
+        let (skip_expression_statement, suppression_span) = if enum_def.name() == "Statement" {
+            (
+                quote! { !matches!(self.inner, Statement::ExpressionStatement(_)) && },
+                quote! {
+                    let suppression_span = match self.inner {
+                        Statement::ExportNamedDeclaration(export) => {
+                            if let Some(Declaration::ClassDeclaration(decl)) = &export.declaration
+                                && let Some(decorator) = decl.decorators.first()
+                                && decorator.span().start < export.span.start
+                            {
+                                Span::new(decorator.span().start, export.span.end)
+                            } else {
+                                self.span()
+                            }
+                        }
+                        Statement::ExportDefaultDeclaration(export) => {
+                            if let ExportDefaultDeclarationKind::ClassDeclaration(decl) = &export.declaration
+                                && let Some(decorator) = decl.decorators.first()
+                                && decorator.span().start < export.span.start
+                            {
+                                Span::new(decorator.span().start, export.span.end)
+                            } else {
+                                self.span()
+                            }
+                        }
+                        _ => self.span(),
+                    };
+                },
+            )
         } else {
-            quote! {}
+            (quote! {}, quote! { let suppression_span = self.span(); })
         };
 
         quote! {
+            #suppression_span
             if #skip_expression_statement
-                f.comments().has_line_suppression_comment_at_end_of_line(self.span().end)
+                f.comments().has_line_suppression_comment_at_end_of_line(suppression_span.end)
             {
-                format_leading_comments(self.span()).fmt(f);
-                FormatSuppressedNode(self.span()).fmt(f);
+                format_leading_comments(suppression_span).fmt(f);
+                FormatSuppressedNode(suppression_span).fmt(f);
                 format_trailing_comments(self.parent.span(), self.inner.span(), self.following_span_start)
                     .fmt(f);
                 return;

@@ -3,7 +3,7 @@
 
 #![expect(clippy::match_same_arms)]
 use oxc_ast::ast::*;
-use oxc_span::GetSpan;
+use oxc_span::{GetSpan, Span};
 
 use crate::{
     ast_nodes::AstNode,
@@ -1585,11 +1585,34 @@ impl<'a> Format<'a> for AstNode<'a, ParenthesizedExpression<'a>> {
 impl<'a> Format<'a> for AstNode<'a, Statement<'a>> {
     #[inline]
     fn fmt(&self, f: &mut Formatter<'_, 'a>) {
+        let suppression_span = match self.inner {
+            Statement::ExportNamedDeclaration(export) => {
+                if let Some(Declaration::ClassDeclaration(decl)) = &export.declaration
+                    && let Some(decorator) = decl.decorators.first()
+                    && decorator.span().start < export.span.start
+                {
+                    Span::new(decorator.span().start, export.span.end)
+                } else {
+                    self.span()
+                }
+            }
+            Statement::ExportDefaultDeclaration(export) => {
+                if let ExportDefaultDeclarationKind::ClassDeclaration(decl) = &export.declaration
+                    && let Some(decorator) = decl.decorators.first()
+                    && decorator.span().start < export.span.start
+                {
+                    Span::new(decorator.span().start, export.span.end)
+                } else {
+                    self.span()
+                }
+            }
+            _ => self.span(),
+        };
         if !matches!(self.inner, Statement::ExpressionStatement(_))
-            && f.comments().has_line_suppression_comment_at_end_of_line(self.span().end)
+            && f.comments().has_line_suppression_comment_at_end_of_line(suppression_span.end)
         {
-            format_leading_comments(self.span()).fmt(f);
-            FormatSuppressedNode(self.span()).fmt(f);
+            format_leading_comments(suppression_span).fmt(f);
+            FormatSuppressedNode(suppression_span).fmt(f);
             format_trailing_comments(
                 self.parent.span(),
                 self.inner.span(),

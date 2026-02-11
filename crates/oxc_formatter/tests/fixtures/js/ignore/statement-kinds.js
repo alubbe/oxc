@@ -1,5 +1,7 @@
 import   {foo as bar}   from   "pkg"; // prettier-ignore
 export const item={  a:1,b:2}; // prettier-ignore
+@decorator export class A {} // prettier-ignore
+@decorator export default class B {} // prettier-ignore
 
 const config={  retries:10,timeout:5000}; // prettier-ignore
 let data=[ 1,2,3 ]; // prettier-ignore
